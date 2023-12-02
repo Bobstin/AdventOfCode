@@ -10,6 +10,12 @@ TARGET_ROOMS = {
     "C": 2,
     "D": 3,
 }
+WIN_POD = {
+    0: "A",
+    1: "B",
+    2: "C",
+    3: "D",
+}
 DIFFICULTY = {
     "A": 1,
     "B": 10,
@@ -75,16 +81,12 @@ def play(hallway, rooms, energy, prior_moves):
 
 
 def check_for_win(rooms):
-    return (
-        rooms[0][0] == "A"
-        and rooms[0][1] == "A"
-        and rooms[1][0] == "B"
-        and rooms[1][1] == "B"
-        and rooms[2][0] == "C"
-        and rooms[2][1] == "C"
-        and rooms[3][0] == "D"
-        and rooms[3][1] == "D"
-    )
+    for index, room in enumerate(rooms):
+        for spot in room:
+            if spot != WIN_POD[index]:
+                return False
+
+    return True
 
 
 def check_for_ability_to_reach_target(
@@ -116,10 +118,15 @@ def check_for_ability_to_reach_target(
     target_room = TARGET_ROOMS[pod]
     target_room_exit = ROOM_EXITS[target_room]
 
+    # Room cannot contain any incorrect pods
+    found_incorrect_pod = False
+    for spot in rooms[target_room]:
+        if spot != pod and spot is not None:
+            found_incorrect_pod = True
+            break
+
     # If room is fully empty, or if the first slot is empty and the second has the right pod in it
-    if (rooms[target_room][0] is None and rooms[target_room][1] is None) or (
-        rooms[target_room][0] is None and rooms[target_room][1] == pod
-    ):
+    if not found_incorrect_pod:
         # If it is, see if they can get there
         if target_room_exit < starting_pos:
             required_clear_hallway = set(range(target_room_exit, starting_pos))
@@ -145,6 +152,15 @@ def possible_moves(
             pod, hallway, index, rooms
         )
         if can_make_room:
+            # Find the deepest you can go
+            target_room = rooms[TARGET_ROOMS[pod]]
+            target_position = None
+            for spot_index, spot in enumerate(target_room):
+                if spot is None:
+                    target_position = spot_index
+                else:
+                    break
+
             return [
                 {
                     "pod": pod,
@@ -152,7 +168,7 @@ def possible_moves(
                     "to": {
                         "type": "room",
                         "index": TARGET_ROOMS[pod],
-                        "position": 1 if rooms[TARGET_ROOMS[pod]][1] is None else 0,
+                        "position": target_position,
                     },
                 }
             ]
@@ -161,7 +177,14 @@ def possible_moves(
     possible_room_exits = []
     for index, room in enumerate(rooms):
         # If no one in room, skip
-        if room[0] is None and room[1] is None:
+        pod = None
+        room_position = None
+        for spot_index, spot in enumerate(room):
+            if spot is not None:
+                pod = spot
+                room_position = spot_index
+                break
+        if pod is None:
             continue
 
         # If you can't leave the room, skip
@@ -169,16 +192,29 @@ def possible_moves(
         if hallway[exit] is not None:
             continue
 
-        pod = room[0] if room[0] is not None else room[1]
-        assert pod is not None
-        room_position = 0 if room[0] is not None else 1
-
-        # If you are in the back of the target room, skip
-        if room_position == 1 and TARGET_ROOMS[pod] == index:
+        # If everyone in the room is correct, skip
+        if all([spot == WIN_POD[index] for spot in room]):
             continue
 
+        # If you are in the back of the target room, skip
+        last_room_position = len(room) - 1
+        if room_position == last_room_position and TARGET_ROOMS[pod] == index:
+            continue
+
+        # Get the farthest back spot available in the target room
+        farthest_back_available = None
+        for position_index in range(last_room_position, -1, -1):
+            if rooms[TARGET_ROOMS[pod]][position_index] is None:
+                farthest_back_available = position_index
+                break
+
         # If you are in the front of the target room and the back is empty, go to the back
-        if room_position == 0 and TARGET_ROOMS[pod] == index and room[1] is None:
+        if (
+            room_position < last_room_position
+            and TARGET_ROOMS[pod] == index
+            and farthest_back_available is not None
+            and farthest_back_available > room_position
+        ):
             return [
                 {
                     "pod": pod,
@@ -190,10 +226,20 @@ def possible_moves(
                     "to": {
                         "type": "room",
                         "index": index,
-                        "position": 1,
+                        "position": farthest_back_available,
                     },
                 }
             ]
+
+        # Otherwise, if you are in the target room already and everything behind you is correct, skip
+        if TARGET_ROOMS[pod] == index:
+            all_others_correct = True
+            for position_index in range(room_position, len(room)):
+                if room[position_index] != pod:
+                    all_others_correct = False
+                    break
+            if all_others_correct:
+                continue
 
         can_make_room, possible_hallways = check_for_ability_to_reach_target(
             pod, hallway, exit, rooms
@@ -212,7 +258,7 @@ def possible_moves(
                     "to": {
                         "type": "room",
                         "index": TARGET_ROOMS[pod],
-                        "position": 1 if rooms[TARGET_ROOMS[pod]][1] is None else 0,
+                        "position": farthest_back_available,
                     },
                 }
             ]
@@ -268,16 +314,14 @@ def score_move(move: dict) -> int:
 
 def hash_state(hallway, rooms):
     adjusted_hallway = [pod if pod is not None else "None" for pod in hallway]
+    adjusted_rooms = []
+    for room in rooms:
+        adjusted_rooms.append([pod if pod is not None else "None" for pod in room])
     return (
         "HW: "
         + "".join(adjusted_hallway)
         + " RM:"
-        + "".join(
-            [
-                f"[{room[0] if room[0] is not None else 'None'},{room[1] if room[1] is not None else 'None'}]"
-                for room in rooms
-            ]
-        )
+        + "".join([f"[{','.join(room)}]" for room in adjusted_rooms])
     )
 
 
@@ -315,6 +359,54 @@ if __name__ == "__main__":
         None,
     ]
     initial_rooms = [["D", "C"], ["B", "C"], ["B", "D"], ["A", "A"]]
+    min_energy = None
+    achieved_states = {}
+    play(initial_hallway, initial_rooms, 0, [])
+    print(min_energy)
+
+    initial_hallway = [
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
+    test_initial_rooms = [
+        ["B", "D", "D", "A"],
+        ["C", "C", "B", "D"],
+        ["B", "B", "A", "C"],
+        ["D", "A", "C", "A"],
+    ]
+    min_energy = None
+    achieved_states = {}
+    play(initial_hallway, test_initial_rooms, 0, [])
+    print(min_energy)
+
+    initial_hallway = [
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
+    initial_rooms = [
+        ["D", "D", "D", "C"],
+        ["B", "C", "B", "C"],
+        ["B", "B", "A", "D"],
+        ["A", "A", "C", "A"],
+    ]
     min_energy = None
     achieved_states = {}
     play(initial_hallway, initial_rooms, 0, [])

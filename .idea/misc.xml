@@ -4,5 +4,5 @@
     <option name="pathToExecutable" value="C:\Python311\Scripts\black.exe" />
     <option name="sdkName" value="advent" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="advent" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.12" project-jdk-type="Python SDK" />
 </project>
